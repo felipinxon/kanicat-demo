@@ -1,16 +1,14 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Modelo configurable. Para un chat en tiempo real priorizamos latencia →
-// Haiku 4.5 por defecto. Cambia KANI_MODEL=claude-opus-4-8 para máxima calidad.
-const MODEL = process.env.KANI_MODEL || "claude-haiku-4-5";
+// Reutiliza la API de OpenAI ya disponible en el servidor (app panoramax).
+const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-const SYSTEM = `Eres "Kani", la asistente virtual con IA de **Kanicat · Clínica Veterinaria** en Bogotá (barrios CAI Navarra/Usaquén y San Patricio). Esta es una DEMOSTRACIÓN: las acciones que ejecutas son simuladas, pero deben sentirse reales y útiles.
+const SYSTEM = `Eres "Kani", la asistente virtual con IA de **Kanicat · Clínica Veterinaria** en Bogotá (sedes CAI Navarra/Usaquén y San Patricio). Esto es una DEMOSTRACIÓN: las acciones que ejecutas son simuladas, pero deben sentirse reales y útiles.
 
-Tono: cálido, cercano y profesional. Español colombiano. Respuestas BREVES (1-3 frases), con algún emoji ocasional (💜🐾). Nunca inventes precios exactos de servicios médicos; para productos usa los de la farmacia.
+Tono: cálido, cercano y profesional. Español colombiano. Respuestas BREVES (1-3 frases), con algún emoji ocasional (💜🐾). Nunca inventes precios de servicios médicos; para productos usa los de la farmacia.
 
 Datos de Kanicat:
 - 25+ años de experiencia. Fundada por el Dr. Enrique Vallejo. +1.200 familias, 4.9★.
@@ -19,79 +17,83 @@ Datos de Kanicat:
 - Servicios: consulta, urgencias 24/7, cirugía, hospitalización/UCI, laboratorio, imágenes (rayos X, ecografía, endoscopia, laparoscopia), vacunación y farmacia.
 - Farmacia: alimento terapéutico (Hill's i/d, c/d, l/d, a/d), suplementos (Organew, Enterex), medicamentos y accesorios.
 
-Usa las herramientas cuando corresponda:
-- agendar_cita: cuando el usuario quiera reservar/agendar una cita o consulta.
-- evaluar_urgencia: cuando describa síntomas o una posible emergencia. Evalúa el nivel (verde=leve, ambar=requiere atención pronto, rojo=posible urgencia) y da 3 pasos concretos. NO diagnostiques definitivamente; ante rojo, indica acudir a urgencias 24/7.
+Usa las funciones cuando corresponda:
+- agendar_cita: cuando el usuario quiera reservar/agendar una cita.
+- evaluar_urgencia: cuando describa síntomas. Evalúa nivel (verde=leve, ambar=atención pronto, rojo=posible urgencia) y da 3 pasos. NO diagnostiques definitivamente; ante rojo, indica acudir a urgencias 24/7.
 - plan_vacunas: cuando pregunte por vacunas, refuerzos o carnet.
 - reordenar_farmacia: cuando quiera comprar/reordenar alimento o productos.
 
-Tras usar una herramienta, añade una frase breve y amable confirmando la acción. Si la pregunta es general (ubicación, horarios, servicios), responde directamente sin herramienta.`;
+Tras usar una función, añade una frase breve confirmando la acción. Para preguntas generales (ubicación, horarios, servicios) responde directamente sin función.`;
 
-const tools: Anthropic.Tool[] = [
+const tools = [
   {
-    name: "agendar_cita",
-    description:
-      "Agenda una cita/consulta veterinaria (demo). Úsala cuando el usuario quiera reservar una cita.",
-    input_schema: {
-      type: "object",
-      properties: {
-        servicio: { type: "string", description: "Ej: Consulta general, Vacunación, Cirugía, Urgencia" },
-        mascota: { type: "string", description: "Nombre de la mascota" },
-        especie: { type: "string", description: "Perro o Gato" },
-        sede: { type: "string", description: "Sede Navarra o Sede San Patricio" },
-        fecha: { type: "string", description: "Fecha legible, ej: 'miércoles 24 jul'" },
-        hora: { type: "string", description: "Hora, ej: '10:30 a.m.'" },
+    type: "function",
+    function: {
+      name: "agendar_cita",
+      description: "Agenda una cita/consulta veterinaria (demo).",
+      parameters: {
+        type: "object",
+        properties: {
+          servicio: { type: "string", description: "Ej: Consulta general, Vacunación, Cirugía, Urgencia" },
+          mascota: { type: "string" },
+          especie: { type: "string", description: "Perro o Gato" },
+          sede: { type: "string", description: "Sede Navarra o Sede San Patricio" },
+          fecha: { type: "string", description: "Ej: 'miércoles 24 jul'" },
+          hora: { type: "string", description: "Ej: '10:30 a.m.'" },
+        },
       },
-      required: [],
     },
   },
   {
-    name: "evaluar_urgencia",
-    description:
-      "Evalúa el nivel de urgencia a partir de los síntomas descritos (demo triage).",
-    input_schema: {
-      type: "object",
-      properties: {
-        sintomas: { type: "string", description: "Resumen de los síntomas del usuario" },
-        nivel: { type: "string", enum: ["verde", "ambar", "rojo"] },
-        recomendacion: { type: "string", description: "Recomendación breve" },
-        pasos: { type: "array", items: { type: "string" }, description: "3 pasos concretos" },
+    type: "function",
+    function: {
+      name: "evaluar_urgencia",
+      description: "Evalúa el nivel de urgencia a partir de los síntomas (demo triage).",
+      parameters: {
+        type: "object",
+        properties: {
+          sintomas: { type: "string" },
+          nivel: { type: "string", enum: ["verde", "ambar", "rojo"] },
+          recomendacion: { type: "string" },
+          pasos: { type: "array", items: { type: "string" } },
+        },
+        required: ["sintomas", "nivel"],
       },
-      required: ["sintomas", "nivel"],
     },
   },
   {
-    name: "plan_vacunas",
-    description: "Genera el carnet y plan de vacunación de la mascota (demo).",
-    input_schema: {
-      type: "object",
-      properties: {
-        nombre: { type: "string", description: "Nombre de la mascota" },
-        especie: { type: "string", enum: ["Perro", "Gato"] },
-        edadMeses: { type: "number", description: "Edad en meses" },
+    type: "function",
+    function: {
+      name: "plan_vacunas",
+      description: "Genera el carnet y plan de vacunación de la mascota (demo).",
+      parameters: {
+        type: "object",
+        properties: {
+          nombre: { type: "string" },
+          especie: { type: "string", enum: ["Perro", "Gato"] },
+          edadMeses: { type: "number" },
+        },
       },
-      required: [],
     },
   },
   {
-    name: "reordenar_farmacia",
-    description: "Arma un pedido de farmacia (alimento/medicamentos) para recoger o domicilio (demo).",
-    input_schema: {
-      type: "object",
-      properties: {
-        items: {
-          type: "array",
+    type: "function",
+    function: {
+      name: "reordenar_farmacia",
+      description: "Arma un pedido de farmacia para recoger o domicilio (demo).",
+      parameters: {
+        type: "object",
+        properties: {
           items: {
-            type: "object",
-            properties: {
-              producto: { type: "string" },
-              cantidad: { type: "number" },
+            type: "array",
+            items: {
+              type: "object",
+              properties: { producto: { type: "string" }, cantidad: { type: "number" } },
             },
           },
+          entrega: { type: "string", enum: ["domicilio", "recoger"] },
         },
-        entrega: { type: "string", enum: ["domicilio", "recoger"] },
       },
-      required: [],
     },
   },
 ];
@@ -102,30 +104,48 @@ export async function POST(req: NextRequest) {
       messages: { role: "user" | "assistant"; content: string }[];
     };
 
-    if (!process.env.ANTHROPIC_API_KEY) {
+    if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ error: "no_key" }, { status: 200 });
     }
 
-    const client = new Anthropic();
-
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
-      system: SYSTEM,
-      tools,
-      messages: messages.slice(-12).map((m) => ({ role: m.role, content: m.content })),
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [{ role: "system", content: SYSTEM }, ...messages.slice(-12)],
+        tools,
+        tool_choice: "auto",
+        temperature: 0.6,
+        max_tokens: 700,
+      }),
     });
 
-    let text = "";
-    let tool: { name: string; input: Record<string, any> } | null = null;
-    for (const block of response.content) {
-      if (block.type === "text") text += block.text;
-      else if (block.type === "tool_use" && !tool) {
-        tool = { name: block.name, input: block.input as Record<string, any> };
-      }
+    if (!res.ok) {
+      console.error("[kani/api] openai error", res.status, await res.text());
+      return NextResponse.json({ error: "api_error" }, { status: 200 });
     }
 
-    return NextResponse.json({ text: text.trim(), tool });
+    const data = await res.json();
+    const msg = data?.choices?.[0]?.message;
+    let text: string = (msg?.content || "").trim();
+    let tool: { name: string; input: Record<string, any> } | null = null;
+
+    const call = msg?.tool_calls?.[0];
+    if (call?.function?.name) {
+      let input: Record<string, any> = {};
+      try {
+        input = JSON.parse(call.function.arguments || "{}");
+      } catch {
+        input = {};
+      }
+      tool = { name: call.function.name, input };
+    }
+
+    return NextResponse.json({ text, tool });
   } catch (err: any) {
     console.error("[kani/api] error:", err?.message || err);
     return NextResponse.json({ error: "api_error" }, { status: 200 });

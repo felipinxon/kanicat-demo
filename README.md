@@ -9,7 +9,7 @@ Rediseño completo (demo) del sitio de **Kanicat · Clínica Veterinaria** (Bogo
 - **Next.js 14** (App Router) + **TypeScript**
 - **Tailwind CSS** + **Framer Motion**
 - Componentes al estilo **Aceternity UI** (navbar redimensionable, spotlight, bento grid, text-flip, gooey input, following pointer, dotted glow)
-- Backend del chat: **Anthropic Claude** (`/api/chat`, tool-use) con fallback local
+- Backend del chat: **OpenAI** (`/api/chat`, function-calling) con fallback local por palabras clave
 
 ## Desarrollo
 
@@ -18,8 +18,8 @@ npm install
 npm run dev      # http://localhost:3000
 ```
 
-Sin `ANTHROPIC_API_KEY` el chat funciona en modo demo local (fallback por palabras clave).
-Para conectar a Claude, copia `.env.example` a `.env.local` y define la clave.
+Sin `OPENAI_API_KEY` el chat funciona en modo demo local (fallback por palabras clave).
+Para conectar la IA, copia `.env.example` a `.env.local` y define la clave.
 
 ## Producción
 
@@ -27,8 +27,8 @@ Para conectar a Claude, copia `.env.example` a `.env.local` y define la clave.
 npm run build && npm run start
 ```
 
-Se despliega con **Docker** (`output: standalone`) — ver `Dockerfile`. En Coolify se define
-`ANTHROPIC_API_KEY` (y opcional `KANI_MODEL`) como variable de entorno.
+Se despliega con **Docker** (`output: standalone`) — ver `Dockerfile`. En el servidor se define
+`OPENAI_API_KEY` (y opcional `OPENAI_MODEL`) como variable de entorno.
 
 ## Marca
 
